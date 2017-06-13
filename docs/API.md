@@ -16,17 +16,18 @@ d = atx.connect()
 目前支持4个环境变量
 
 ```sh
-ATX_ADB_SERIALNO
+ATX_PLATFORM  # 默认是 android
+ATX_CONNECT_URL # 设备连接地址，可以是serialno或者wdaUrl
 ATX_ADB_HOST
 ATX_ADB_PORT
-ATX_PLATFORM  默认是 android
+ATX_ADB_SERIALNO # 建议使用 ATX_CONNECT_URL 代替
 ```
 
 ```sh
 $ python -c 'import atx; atx.connect("EFF153")'
 
 # 等价写法
-$ export ATX_ADB_SERIALNO="EFF153"
+$ export ATX_CONNECT_URL="EFF153"
 $ python -c 'import atx; atx.connect()'
 ```
 
@@ -36,8 +37,15 @@ $ python -c 'import atx; atx.connect()'
 package_name = 'com.example.game'
 
 d.stop_app(package_name)
-
 # d.stop_app(package_name, clear=True) # stop and remove app data (only Android)
+
+# recommend way
+d.start_app(package_name, main_activity)
+
+# force stop the target app before starting the activity
+d.start_app(package_name, main_activity, stop=True)
+
+# use adb shell monkey to start app (not recommend)
 d.start_app(package_name)
 ```
 
@@ -96,9 +104,29 @@ d.click_nowait('button.png')
 
 # 文件名添加截图手机的分辨率, 脚本运行在其他分辨率的手机上时可以自动适应
 d.click_image("button.1920x1080.png")
-# 等价于
-d.click_image(atx.Pattern('button.png', rsl=(1080, 1920)))
+```
 
+## 多分辨率适配
+```
+# 下面这种方法会自动根据当前测试手机的分辨率选择合适的文件
+# 比如手机分辨率1920x1080,代码会自动寻找文件4中文件之一，找到就返回
+# - button@1920x1080.png
+# - button@1080x1920.png
+# - button.1920x1080.png
+# - button.1080x1920.png
+d.click_image("button@auto.png")
+```
+
+比如下面这张图
+![gionee-close-ad](multisize-button.png)
+
+点击这个按钮用这种方法就好 `d.click_image("gionee-close-ad@auto.png")`
+
+关于为什么同时出现用`@`和`.`分隔，一开始用的是pytk写的编辑器，那个tkFileDialog对`@`支持的不好，所以只能用`.`
+
+## 偏移量以及范围限制
+
+```
 # 文件名中添加偏移量, 格式为 <L|R><number><T|B><number>.png
 # 其中 L: Left, R: Right, T: Top, B: Bottom
 # number为百分比
@@ -129,6 +157,28 @@ nd = d.region(atx.Bounds(50, 50, 180, 300))
 print nd.match('folder.png')
 ```
 
+## 锁定当前屏幕（主要用于提高查询效率）
+```
+d.keep_screen()
+d.click_nowait("button1.png")
+d.click_nowait("button2.png")
+d.free_screen()
+```
+
+这种操作，执行第二次`click_nowait`时，就不会再次截图。另外上面的代码也可以这样写
+
+```
+with d.keep_screen():
+	d.click_nowait("button1.png")
+	d.click_nowait("button2.png")
+```
+
+## 图片等待操作
+```
+d.wait("button.png") # 等待一个按钮出现
+d.wait_gone("button.png") # 等待一个按钮消失
+```
+
 ## 原生UI操作
 下面给的例子并不完全，更多的接口需要看下面这两个链接
 
@@ -147,14 +197,21 @@ d.swipe(sx, sy, ex, ey)
 # swipe from (sx, sy) to (ex, ey) with 10 steps
 d.swipe(sx, sy, ex, ey, steps=10)
 
-## 文本的输入 (only Android)
-
+## 文本的输入
 ```py
 d.type("hello world")
 d.type("atx", enter=True) # perform enter after input
 d.type("atx", next=True) # jump to next after input
 d.clear_text() # clear input
 ```
+
+安卓手机因为输入法的众多，接口不统一，所以为了方便我们的自动化，就专门做了一个输入法。下载安装ATX助手即可
+
+```
+python -matx install atx-assistant
+```
+
+通常直接调用 `d.type`是不会出问题的，但也不是绝对的。最好在测试之前调用 `d.prepare_ime()` 将输入法切换到我们定制的**ATX助手输入法**
 
 ## Common settings
 	
@@ -179,50 +236,7 @@ d.rotation = None # default auto detect, 这个配置一下比较好，自动识
 # 1: home key right
 # 2: home key top
 # 3: home key left
-
-# 图片路径查找(实验性功能)
-d.image_path = ['.'] # 默认
-
-# 主要用在希望代码和图片放在不同目录的情况, 如代码结构
-# /--
-#   |-- test.py
-#   |-- images/
-#          |- photo1.png
-#          `- photo2.png
-#
-
-# test.py 中的关键性代码
-d.image_path = ['.', 'images']
-d.click_image('photo1.png')
-d.click_image('photo2.png')
 ```
-
-
-## 监控事件 (即将废弃，不建议使用)
-
-watch是一个内部循环，对于on函数中的所有出现的图片进行监控，如果发现吻合的，就执行后续的操作，直到timeout时间到。
-
-下面的这个例子，效果为 当出现`notification.png`就点击`confirm.png`图片，只有检查的顺序，并没有执行的顺序。需要注意的是需要在timeout超时之前，执行`quit`函数
-
-```py
-# watcher, trigger when screenshot is called
-def foo(event):
-	print 'It happens', event
-	d.click(*event.pos)
-
-timeout = 50.0 # 50s
-with d.watch(timeout=timeout) as w:
-	w.on('enter-game.png').click()
-	w.on('notification.png').on('npc.png').click('confirm.png')
-	w.on('inside.png').quit().quit()
-	w.on_ui(text='Login').quit() # UI Component
-	w.on('outside.png').do(foo)
-
-# will not raise errors(TODO: not working in latest version)
-# 'enter game' is just a name which will seen in debug log
-with d.watch('enter game', timeout, raise_errors=False) as w:
-	w.on('output.png').click()
-```	
 
 ## events函数调用事件
 

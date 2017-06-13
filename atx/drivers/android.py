@@ -65,6 +65,7 @@ def getenvs(*names):
         if os.getenv(name):
             return os.getenv(name)
 
+
 class AndroidDevice(DeviceMixin, UiaDevice):
     def __init__(self, serialno=None, **kwargs):
         """Initial AndroidDevice
@@ -92,11 +93,10 @@ class AndroidDevice(DeviceMixin, UiaDevice):
         DeviceMixin.__init__(self)
 
         self._randid = base.id_generator(5)
-        self._uiauto = super(AndroidDevice, self)
+        self._uiauto = super(AndroidDevice, self) # also will call DeviceMixin method, not very good
 
         self.screen_rotation = None
         self.screenshot_method = consts.SCREENSHOT_METHOD_AUTO
-        self.last_screenshot = None
 
     @property
     def serial(self):
@@ -233,7 +233,6 @@ class AndroidDevice(DeviceMixin, UiaDevice):
             self.adb_shell(command)
             self.adb_cmd(['pull', phone_tmp_file, local_tmp_file])
             image = imutils.open_as_pillow(local_tmp_file)
-
             # Fix rotation not rotate right.
             (width, height) = image.size
             if self.screen_rotation in [1, 3] and width < height:
@@ -242,13 +241,13 @@ class AndroidDevice(DeviceMixin, UiaDevice):
         except IOError:
             raise IOError("Screenshot use minicap failed.")
         finally:
-            if os.path.exists(local_tmp_file):
-                os.unlink(local_tmp_file)
             self.adb_shell(['rm', phone_tmp_file])
+            base.remove_force(local_tmp_file)
 
     def _screenshot_uiauto(self):
         tmp_file = self._mktemp()
-        self._uiauto.screenshot(tmp_file)
+        UiaDevice.screenshot(self, tmp_file)
+        # self._uiauto.screenshot(tmp_file) # this will call Mixin.screenshot first, which may get too many loop
         try:
             return imutils.open_as_pillow(tmp_file)
         except IOError:
@@ -269,20 +268,7 @@ class AndroidDevice(DeviceMixin, UiaDevice):
         """
         return self._uiauto.click(x, y)
 
-    @hook_wrap(consts.EVENT_SCREENSHOT)
-    def screenshot(self, filename=None):
-        """
-        Take screen snapshot
-
-        Args:
-            filename: filename where save to, optional
-
-        Returns:
-            PIL.Image object
-
-        Raises:
-            TypeError, IOError
-        """
+    def _take_screenshot(self):
         screen = None
         if self.screenshot_method == consts.SCREENSHOT_METHOD_UIAUTOMATOR:
             screen = self._screenshot_uiauto()
@@ -297,14 +283,6 @@ class AndroidDevice(DeviceMixin, UiaDevice):
                 self.screenshot_method = consts.SCREENSHOT_METHOD_UIAUTOMATOR
         else:
             raise TypeError('Invalid screenshot_method')
-
-        if filename:
-            save_dir = os.path.dirname(filename) or '.'
-            if not os.path.exists(save_dir):
-                os.makedirs(save_dir)
-            screen.save(filename)
-
-        self.last_screenshot = screen
         return screen
 
     def raw_cmd(self, *args, **kwargs):
@@ -361,7 +339,7 @@ class AndroidDevice(DeviceMixin, UiaDevice):
                 props[m.group('key')] = m.group('value')
         return props
 
-    def start_app(self, package_name, activity=None):
+    def start_app(self, package_name, activity=None, stop=False):
         '''
         Start application
 
@@ -370,12 +348,29 @@ class AndroidDevice(DeviceMixin, UiaDevice):
             - activity (string): optional, activity name
 
         Returns time used (unit second), if activity is not None
+
+        Document: usage: adb shell am start
+            -D: enable debugging
+            -W: wait for launch to complete
+            --start-profiler <FILE>: start profiler and send results to <FILE>
+            --sampling INTERVAL: use sample profiling with INTERVAL microseconds
+                between samples (use with --start-profiler)
+            -P <FILE>: like above, but profiling stops when app goes idle
+            -R: repeat the activity launch <COUNT> times.  Prior to each repeat,
+                the top activity will be finished.
+            -S: force stop the target app before starting the activity
+            --opengl-trace: enable tracing of OpenGL functions
+            --user <USER_ID> | current: Specify which user to run as; if not
+                specified then run as the current user.
         '''
         _pattern = re.compile(r'TotalTime: (\d+)')
         if activity is None:
             self.adb_shell(['monkey', '-p', package_name, '-c', 'android.intent.category.LAUNCHER', '1'])
         else:
-            output = self.adb_shell(['am', 'start', '-W', '-n', '%s/%s' % (package_name, activity)])
+            args = ['-W']
+            if stop:
+                args.append('-S')
+            output = self.adb_shell(['am', 'start'] + args + ['-n', '%s/%s' % (package_name, activity)])
             m = _pattern.search(output)
             if m:
                 return int(m.group(1))/1000.0
@@ -480,6 +475,18 @@ class AndroidDevice(DeviceMixin, UiaDevice):
             ui_nodes.append(self._parse_xml_node(node))
         return ui_nodes
 
+    def dump_view(self):
+        """Current Page XML
+        """
+        warnings.warn("deprecated, source() instead", DeprecationWarning)
+        return self._uiauto.dump()
+
+    def source(self, *args, **kwargs):
+        """
+        Dump page xml
+        """
+        return self._uiauto.dump(*args, **kwargs)
+
     def _escape_text(self, s, utf7=False):
         s = s.replace(' ', '%s')
         if utf7:
@@ -503,25 +510,58 @@ class AndroidDevice(DeviceMixin, UiaDevice):
 
         Args:
             - ime(string): for example "android.unicode.ime/.Utf7ImeService"
+
+        Raises:
+            RuntimeError
         """
         self.adb_shell(['ime', 'enable', ime])
         self.adb_shell(['ime', 'set', ime])
 
+        from_time = time.time()
+        while time.time() - from_time < 10.0:
+            if ime == self.current_ime(): # and self._adb_device.is_keyboard_shown():
+                return
+            time.sleep(0.2)
+        else:
+            raise RuntimeError("Error switch to input-method (%s)." % ime)
+
     def _is_utf7ime(self, ime=None):
         if ime is None:
             ime = self.current_ime()
-        return ime in ['android.unicode.ime/.Utf7ImeService', 'com.netease.atx.assistant/.ime.Utf7ImeService']
+        return ime in [
+            'android.unicode.ime/.Utf7ImeService',
+            'com.netease.atx.assistant/.ime.Utf7ImeService',
+            'com.netease.nie.yosemite/.ime.ImeService']
 
-    def _prepare_ime(self):
+    def prepare_ime(self):
+        """
+        Change current method to adb-keyboard
+
+        Raises:
+            RuntimeError
+        """
         if self._is_utf7ime():
-            return
+            return True
 
         for ime in self.input_methods():
             if self._is_utf7ime(ime):
                 self.enable_ime(ime)
-                return
-        raise RuntimeError("Input method for programers not detected.\n" +
-            "\tInstall with: python -m atx install atx-assistant")
+        return False
+        # raise RuntimeError("Input method for programers not detected.\n" +
+        #     "\tInstall with: python -m atx install atx-assistant")
+
+    def _shell_type(self, text):
+        first = True
+        for s in text.split('%s'):
+            if first:
+                first = False
+            else:
+                self.adb_shell(['input', 'text', '%'])
+                s = 's' + s
+            if s == '':
+                continue
+            estext = self._escape_text(s)
+            self.adb_shell(['input', 'text', estext])
 
     def type(self, text, enter=False, next=False):
         """Input some text, this method has been tested not very stable on some device.
@@ -539,12 +579,17 @@ class AndroidDevice(DeviceMixin, UiaDevice):
         https://android.googlesource.com/platform/frameworks/base/+/android-4.4.2_r1/cmds/input/src/com/android/commands/input/Input.java#159
         app source see here: https://github.com/openatx/android-unicode
         """
-        self._prepare_ime()
-        estext = base64.b64encode(text.encode('utf-7'))
-        self.adb_shell(['am', 'broadcast', '-a', 'ADB_INPUT_TEXT', '--es', 'format', 'base64', '--es', 'msg', estext])
+        utext = strutils.decode(text)
+        if self.prepare_ime():
+            estext = base64.b64encode(utext.encode('utf-7'))
+            self.adb_shell(['am', 'broadcast', '-a', 'ADB_INPUT_TEXT', '--es', 'format', 'base64', '--es', 'msg', estext])
+        else:
+            self._shell_type(utext)
+
         if enter:
             self.keyevent('KEYCODE_ENTER')
         if next:
+            # FIXME(ssx): maybe KEYCODE_NAVIGATE_NEXT
             self.adb_shell(['am', 'broadcast', '-a', 'ADB_EDITOR_CODE', '--ei', 'code', '5'])
 
     def clear_text(self, count=100):
@@ -552,7 +597,7 @@ class AndroidDevice(DeviceMixin, UiaDevice):
         Args:
             - count (int): send KEY_DEL count
         """
-        self._prepare_ime()
+        self.prepare_ime()
         self.keyevent('KEYCODE_MOVE_END')
         self.adb_shell(['am', 'broadcast', '-a', 'ADB_INPUT_CODE', '--ei', 'code', '67', '--ei', 'repeat', str(count)])
 

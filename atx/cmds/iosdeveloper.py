@@ -7,7 +7,6 @@ import os
 import subprocess
 import tempfile
 import logging
-import urllib2
 import shutil
 
 from atx.cmds.utils import http_download
@@ -19,7 +18,7 @@ __alias = {
 
 # Can also be found in directory
 IMAGE_BASE_DIR = '/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/DeviceSupport/'
-IMAGE_BASE_URL = 'http://gohttp.nie.netease.com/tools-ios/DeveloperImages/'
+IMAGE_BASE_URL = 'http://gohttp.nie.netease.com/tools/tools-ios/DeveloperImages/'
 logger = logging.getLogger('ios')
 
 
@@ -97,7 +96,6 @@ def download(filename, tmpdir, version, base_url=IMAGE_BASE_URL):
         version = __alias.get(version, version)
         abs_path = os.path.join(IMAGE_BASE_DIR, version, filename)
         if os.path.exists(abs_path):
-            print abs_path
             return abs_path
     target_path = os.path.join(tmpdir, filename)
     source_url = base_url + '/'.join([version, filename])

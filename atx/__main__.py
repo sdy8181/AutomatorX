@@ -4,13 +4,16 @@
 # USAGE
 # python -matx -s ESLKJXX gui
 
+from __future__ import absolute_import
+from __future__ import unicode_literals
+from __future__ import print_function
+
 import argparse
 import functools
 import json
 import sys
 import inspect
 from contextlib import contextmanager
-import atx.androaxml as apkparse
 
 from atx.cmds import run
 from atx.cmds import iosdeveloper
@@ -47,20 +50,25 @@ def load_main(module_name):
 
 
 def _apk_parse(args):
-    (pkg_name, activity) = apkparse.parse_apk(args.filename)
-    print json.dumps({
-        'package_name': pkg_name,
-        'main_activity': activity,
-    }, indent=4)
+    import atx.androaxml as apkparse
+    manifest = apkparse.parse_apk(args.filename)
+    print(json.dumps({
+        'package_name': manifest.package_name,
+        'main_activity': manifest.main_activity,
+        'version': {
+            'code': manifest.version_code,
+            'name': manifest.version_name,
+        }
+    }, indent=4))
 
 
 def _version(args):
     import atx
-    print atx.version
+    print(atx.version)
 
 
 def _deprecated(args):
-    print 'Deprecated'
+    print('Deprecated')
 
 def main():
     ap = argparse.ArgumentParser(
@@ -89,12 +97,13 @@ def main():
         p.add_argument('--scale', default=0.5, type=float, help='scale size')
         p.set_defaults(func=load_main('tkgui'))
 
-    with add_parser('record') as p:
-        p.add_argument('-d', '--workdir', default='.', help='workdir where case & frame files are saved.')
-        p.add_argument('-e', '--edit', action='store_true', dest='edit_mode', help='edit old records.')
-        p.add_argument('-a', '--nonui-activity', action='append', dest='nonui_activities',
-            required=False, help='nonui-activities for which the recorder will analyze screen image instead of uixml.')
-        p.set_defaults(func=load_main('record'))
+    # Remove because of unstable
+    # with add_parser('record') as p:
+    #     p.add_argument('-d', '--workdir', default='.', help='workdir where case & frame files are saved.')
+    #     p.add_argument('-e', '--edit', action='store_true', dest='edit_mode', help='edit old records.')
+    #     p.add_argument('-a', '--nonui-activity', action='append', dest='nonui_activities',
+    #         required=False, help='nonui-activities for which the recorder will analyze screen image instead of uixml.')
+    #     p.set_defaults(func=load_main('record'))
 
     with add_parser('minicap') as p:
         p.description = 'install minicap to phone'
@@ -149,7 +158,13 @@ def main():
     with add_parser('info') as p:
         p.set_defaults(func=load_main('info'))
 
+    with add_parser('doctor') as p:
+        p.set_defaults(func=load_main('doctor'))
+
     args = ap.parse_args()
+    if not hasattr(args, 'func'):
+        print(' '.join(sys.argv) + ' -h for more help')
+        return
     args.func(args)
 
 if __name__ == '__main__':

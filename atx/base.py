@@ -37,7 +37,7 @@ def exec_cmd(*cmds, **kwargs):
         try:
             envcopy[key] = str(env[key]).encode('utf-8') # fix encoding
         except:
-            print 'IGNORE BAD ENV KEY:', repr(key)
+            print('IGNORE BAD ENV KEY: ' + repr(key))
     env = envcopy
 
     timeout = kwargs.get('timeout', 120)
@@ -73,8 +73,12 @@ def random_name(name):
 
 
 def remove_force(name):
-    if os.path.isfile(name):
-        os.remove(name)
+    if not os.path.isfile(name):
+        return
+    try:
+        os.unlink(name)
+    except Exception as e:
+        print("Warning: tempfile {} not deleted, Error {}".format(name, e))
 
 
 SYSTEM_ENCODING = 'gbk' if os.name == 'nt' else 'utf-8'
@@ -144,7 +148,6 @@ def search_image(name=None, path=['.']):
     FIXME(ssx): this code is just looking wired.
     """
     name = strutils.decode(name)
-
     for image_dir in path:
         if not os.path.isdir(image_dir):
             continue
@@ -158,6 +161,46 @@ def search_image(name=None, path=['.']):
                 continue
             return strutils.encode(image_path)
     return None
+
+def clean_path(filepath):
+    return os.path.normpath(os.path.relpath(strutils.decode(filepath)))
+
+
+def filename_match(fsearch, filename, width, height):
+    '''
+    <nickname>@({width}x{height}|auto).(png|jpg|jpeg)
+    '''
+    fsearch = clean_path(fsearch)
+    filename = clean_path(filename)
+    if fsearch == filename:
+        return True
+
+    if fsearch.find('@') == -1:
+        return False
+    basename, fileext = os.path.splitext(fsearch)
+    nickname, extinfo = basename.split('@', 1)
+    if extinfo == 'auto':
+        valid_names = {}.fromkeys([
+            nickname+'@{}x{}'.format(width, height)+fileext,
+            nickname+'@{}x{}'.format(height, width)+fileext,
+            nickname+'.{}x{}'.format(width, height)+fileext,
+            nickname+'.{}x{}'.format(height, width)+fileext,
+        ])
+        if filename in valid_names:
+            return True
+    # if extinfo.find('x') != -1:
+    #     cw, ch = extinfo.split('x', 1)
+    #     if cw*width == ch*height or cw*height == ch*width:
+    #         return True
+    return False
+
+
+def lookup_image(fsearch, width=0, height=0):
+    dirname = os.path.dirname(fsearch) or "."
+    for file in os.listdir(dirname):
+        filepath = os.path.join(dirname, file)
+        if filename_match(fsearch, filepath, width, height):
+            return filepath
 
 
 def nameddict(name, props):
@@ -215,4 +258,4 @@ if __name__ == '__main__':
     # print search_image()
 
     Point = nameddict('Point', ['x', 'y'])
-    print Point(2, 3, 4)
+    print(Point(2, 3, 4))

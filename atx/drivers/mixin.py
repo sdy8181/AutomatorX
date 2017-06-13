@@ -15,6 +15,7 @@ import time
 import traceback
 import warnings
 
+import six
 import cv2
 import aircv as ac
 from uiautomator import AutomatorDeviceObject
@@ -32,183 +33,6 @@ warnings.simplefilter('default')
 
 __dir__ = os.path.dirname(os.path.abspath(__file__))
 log = logutils.getLogger(__name__)
-
-_Condition = collections.namedtuple('WatchCondition', ['pattern', 'exists'])
-
-class WatcherItem(object):
-    """
-    How to use, for
-    example:
-
-    with d.watch('xx') as w:
-        w.on('button.png').on('enter.png').click()
-        w.on('yes.png').on_not('exit.png').click()
-
-    or
-
-    w = d.watch('yy')
-    w.on('button.png').on('enter.png').click()
-    w.on('button.png').click('enter.png')
-    w.run()
-
-    # blueprint upgrade plan
-    - conditions
-        pattern
-    - hooks
-        functions
-    """
-    def __init__(self, watcher, rule):
-        self._w = watcher
-        self._r = rule
-
-    def on(self, pattern):
-        """Trigger when pattern exists"""
-        self._r['conditions'].append(_Condition(pattern, True))
-        return self
-
-    # def on_not(self, pattern):
-    #     """Trigger when pattern not exists"""
-    #     self._conditions.append(_Condition(pattern, False))
-    #     return self
-
-    def do(self, func):
-        """Trigger with function call
-        Args:
-            func: function which will called when object found. For example.
-
-            def foo(event):
-                print event.pos # (x, y) position
-            
-            w.on('kitty.png').do(foo)
-        
-        Returns:
-            Watcher object
-
-        Raises:
-            SyntaxError
-        """
-        if not callable(func):
-            raise SyntaxError("%s should be a function" % func)
-        self._r['actions'].append(func)
-        return self
-
-    def click(self, *args, **kwargs):
-        def _inner(event):
-            if len(args) or len(kwargs):
-                self._w._dev.click(*args, **kwargs)
-            else:
-                self._w._dev.click(*event.pos)
-        return self.do(_inner)
-
-    def click_image(self, *args, **kwargs):
-        """ async trigger click_image """
-        def _inner(event):
-            return self._w._dev.click_image(*args, **kwargs)
-
-        return self.do(_inner)
-
-    def quit(self):
-        def _inner(event):
-            self._w._done = True
-        return self.do(_inner)
-
-class Watcher(object):
-    Handler = collections.namedtuple('Handler', ['selector', 'action'])
-    Event = collections.namedtuple('Event', ['selector', 'pos'])
-
-    def __init__(self, device, name=None, timeout=None, raise_errors=True):
-        self.name = name
-        self.timeout = timeout
-        self.raise_errors = raise_errors
-        
-        self._dev = device
-        self._done = False
-        self._watches = []
-
-    def on(self, pattern):
-        w = dict(
-            conditions=[_Condition(pattern, True)],
-            actions=[],
-        )
-        self._watches.append(w)
-        return WatcherItem(self, w)
-
-    def on_ui(self, text):
-        w = dict(
-            conditions=[_Condition(self._dev(text=text), True)],
-            actions=[],
-        )
-        self._watches.append(w)
-        return WatcherItem(self, w)
-
-    def _do_hook(self, screen):
-        # patterns = set()
-        for rule in self._watches:
-            conditions = rule['conditions']
-            actions = rule['actions']
-
-            if not actions:
-                continue
-
-            ok = True
-            last_pos = None
-            for condition in conditions:
-                pos = self._match(condition.pattern, screen)
-                if pos:
-                    log.info("watch match: %s", condition)
-                if bool(pos) != condition.exists:
-                    ok = False
-                    break
-                if condition.exists:
-                    last_pos = pos
-            if ok:
-                for fn in actions:
-                    fn(self.Event(None, last_pos))
-                break # FIXME(ssx): maybe need fallthrough, but for now, just simplfy it
-
-    def run(self):
-        # self._run = True
-        start_time = time.time()
-        while not self._done:
-            screen = self._dev.screenshot()
-            self._do_hook(screen)
-
-            if self.timeout is not None:
-                if time.time() - start_time > self.timeout:
-                    if self.raise_errors:
-                        raise errors.WatchTimeoutError("[%s] watch timeout %s" % (self.name, self.timeout,))
-                    break
-                sys.stdout.write("[%s] watching %4.1fs left: %4.1fs\r" %(self.name, self.timeout, self.timeout-time.time()+start_time))
-                sys.stdout.flush()
-        sys.stdout.write('\n')
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, type, value, traceback):
-        self.run()
-
-    def _match(self, selector, screen):
-        ''' Find position for AtxPattern or UIAutomator Object
-
-        Return:
-            position(x, y) or None
-        '''
-        if isinstance(selector, Pattern) or isinstance(selector, basestring):
-            ret = self._dev.match(selector, screen=screen)
-            if ret is None:
-                return
-            log.debug('watch match: %s, confidence: %s', selector, ret)
-            if not ret.matched:
-                return
-            return ret.pos
-        elif isinstance(selector, AutomatorDeviceObject):
-            if not selector.exists:
-                return None
-            info = selector.info['bounds']
-            x = (info['left'] + info['right']) / 2
-            y = (info['bottom'] + info['top']) / 2
-            return (x, y)
 
 
 Traceback = collections.namedtuple('Traceback', ['stack', 'exception'])
@@ -254,9 +78,9 @@ class DeviceMixin(object):
         self._bounds = None
         self._listeners = []
         self._depth = 0 # used for hook_wrap
-        self.image_path = ['.']
         self.__last_screen = None
         self.__keep_screen = False
+        self.__screensize = None
 
     @property
     def resolution(self):
@@ -270,28 +94,34 @@ class DeviceMixin(object):
             if not isinstance(value, tuple) or len(value) != 2:
                 raise TypeError("Value should be tuple, contains two values")
             self._resolution = tuple(sorted(value))
-    
-    def _search_image(self, name, raise_error=True):
-        image_path = base.search_image(name, self.image_path)
-        if raise_error and image_path is None:
-            raise IOError('image file not found: {}'.format(name))
-        return image_path
+
+    @property
+    def last_screenshot(self):
+        return self.__last_screen if self.__last_screen else self.screenshot()
+
+    def _open_image_file(self, path):
+        realpath = base.lookup_image(path, self.__screensize[0], self.__screensize[1])
+        if realpath is None:
+            raise IOError('file not found: {}'.format(path))
+        return imutils.open(realpath)
 
     def pattern_open(self, image):
+        if self.__screensize is None:
+            self.__screensize = self.display
+
         if isinstance(image, Pattern):
             if image._image is None:
-                image_path = self._search_image(image._name)
-                image._image = imutils.open(image_path)
+                image._image = self._open_image_file(image._name)
             return image
-        elif isinstance(image, basestring):
-            image_path = base.search_image(image, self.image_path)
-            if image_path is None:
-                raise IOError('image file not found: {}'.format(image))
-            return Pattern(image_path, image=imutils.open(image_path))
-        elif 'numpy' in str(type(image)):
+        
+        if isinstance(image, six.string_types):
+            path = image
+            return Pattern(path, image=self._open_image_file(path))
+        
+        if 'numpy' in str(type(image)):
             return Pattern('unknown', image=image)
-        else:
-            raise TypeError("Not supported image type: {}".format(type(image)))
+        
+        raise TypeError("Not supported image type: {}".format(type(image)))
 
     def delay(self, secs):
         """Delay some seconds
@@ -335,6 +165,16 @@ class DeviceMixin(object):
         if not safe:
             raise errors.ImageNotFoundError('Not found image %s' %(pattern,))
 
+    def wait_gone(self, pattern, timeout=10.0, safe=False, **match_kwargs):
+        t = time.time() + timeout
+        while time.time() < t:
+            ret = self.exists(pattern, **match_kwargs)
+            if not ret:
+                return True
+            time.sleep(0.2)
+        if not safe:
+            raise errors.ImageNotFoundError('Image not gone %s' %(pattern,))
+
     def touch(self, x, y):
         """ Alias for click """
         self.click(x, y)
@@ -374,6 +214,17 @@ class DeviceMixin(object):
         if 1.0*matches/total > 0.5: # FIXME(ssx): sift just write here
             return FindPoint(ret['result'], ret['confidence'], consts.IMAGE_MATCH_METHOD_SIFT, matched=True)
         return None
+
+    def match_all(self, pattern):
+        """
+        Test method, not suggested to use
+        """
+        pattern = self.pattern_open(pattern)
+        search_img = pattern.image
+        screen = self.region_screenshot()
+        screen = imutils.from_pillow(screen)
+        points = ac.find_all_template(screen, search_img, maxcnt=10)
+        return points
 
     def match(self, pattern, screen=None, rect=None, offset=None, threshold=None, method=None):
         """Check if image position in screen
@@ -486,7 +337,16 @@ class DeviceMixin(object):
         """
         self.__last_screen = self.screenshot()
         self.__keep_screen = True
-        return self
+        inner_self = self
+
+        class _C(object):
+            def __enter__(self):
+                pass
+
+            def __exit__(self, type, value, traceback):
+                inner_self.free_screen()
+
+        return _C()
         
     def free_screen(self):
         """
@@ -496,11 +356,44 @@ class DeviceMixin(object):
         return self
 
     def region_screenshot(self, filename=None):
-        """ take part of the screenshot """
+        """Deprecated
+        Take part of the screenshot
+        """
+        # warnings.warn("deprecated, use screenshot().crop(bounds) instead", DeprecationWarning)
         screen = self.__last_screen if self.__keep_screen else self.screenshot()
         if self.bounds:
             screen = screen.crop(self.bounds)
         if filename:
+            screen.save(filename)
+        return screen
+
+    @hook_wrap(consts.EVENT_SCREENSHOT)
+    def screenshot(self, filename=None):
+        """
+        Take screen snapshot
+
+        Args:
+            - filename: filename where save to, optional
+
+        Returns:
+            PIL.Image object
+
+        Raises:
+            TypeError, IOError
+        """
+        if self.__keep_screen:
+            return self.__last_screen
+        try:
+            screen = self._take_screenshot()
+        except IOError:
+            # try taks screenshot again
+            log.warn("warning, screenshot failed [2/1], retry again")
+            screen = self._take_screenshot()
+        self.__last_screen = screen
+        if filename:
+            save_dir = os.path.dirname(filename) or '.'
+            if not os.path.exists(save_dir):
+                os.makedirs(save_dir)
             screen.save(filename)
         return screen
 
@@ -525,39 +418,37 @@ class DeviceMixin(object):
             if flag & event_flag:
                 fn(event)
 
-    @hook_wrap(consts.EVENT_ASSERT_EXISTS)
-    def assert_exists(self, pattern, timeout=20.0, desc=None, **match_kwargs):
-        """Assert if image exists
-        Args:
-            - image: image filename # not support pattern for now
-            - timeout (float): seconds
+    # @hook_wrap(consts.EVENT_ASSERT_EXISTS)
+    # def assert_exists(self, pattern, timeout=20.0, desc=None, **match_kwargs):
+    #     """Assert if image exists
+    #     Args:
+    #         - image: image filename # not support pattern for now
+    #         - timeout (float): seconds
 
-        Returns:
-            Find point
+    #     Returns:
+    #         Find point
 
-        Raises:
-            AssertExistsError
-        """
-        pattern = self.pattern_open(pattern)
-        search_img = pattern.image
-        # search_img = imutils.open(image)
-        log.info('assert exists image(%s): %s', desc or '', pattern)
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            point = self.match(search_img, **match_kwargs)
-            if point is None:
-                sys.stdout.write('.')
-                sys.stdout.flush()
-                continue
-            if not point.matched:
-                log.debug('Ignore confidence: %s', point.confidence)
-                continue
-            log.debug('assert pass, confidence: %s', point.confidence)
-            sys.stdout.write('\n')
-            return point
-        else:
-            sys.stdout.write('\n')
-            raise errors.AssertExistsError('image not found %s' %(pattern,))
+    #     Raises:
+    #         AssertExistsError
+    #     """
+    #     warnings.warn("deprecated, use rp.assert_exists instead", DeprecationWarning)
+    #     log.info('assert exists image(%s): %s', desc or '', pattern)
+    #     start_time = time.time()
+    #     while time.time() - start_time < timeout:
+    #         point = self.match(pattern, **match_kwargs)
+    #         if point is None:
+    #             sys.stdout.write('.')
+    #             sys.stdout.flush()
+    #             continue
+    #         if not point.matched:
+    #             log.debug('Ignore confidence: %s', point.confidence)
+    #             continue
+    #         log.info('assert pass, confidence: %s', point.confidence)
+    #         sys.stdout.write('\n')
+    #         return point
+    #     else:
+    #         sys.stdout.write('\n')
+    #         raise errors.AssertExistsError('image not found %s' %(pattern,))
             
     @hook_wrap(consts.EVENT_CLICK_IMAGE)
     def click_nowait(self, pattern, action='click', desc=None, **match_kwargs):
@@ -577,6 +468,19 @@ class DeviceMixin(object):
         func = getattr(self, action)
         func(*point.pos)
         return point
+
+    def click_exists(self, *args, **kwargs):
+        """ Click when target exists
+        Example usage:
+            - click_exists("button.png")
+            - click_exists(text="Update")
+        """
+        if len(args) > 0:
+            return self.click_nowait(*args, **kwargs)
+        else:
+            elem = self(**kwargs)
+            if elem.exists:
+                return elem.click()
 
     @hook_wrap(consts.EVENT_CLICK_IMAGE)
     def click_image(self, pattern, timeout=20.0, action='click', safe=False, desc=None, delay=None, **match_kwargs):
@@ -633,23 +537,8 @@ class DeviceMixin(object):
         # FIXME(ssx): maybe this function is too complex
         return point #collections.namedtuple('X', ['pattern', 'point'])(pattern, point)
 
-    def watch(self, name='', timeout=None, raise_errors=True):
-        """Return a new watcher
-        Args:
-            name: string watcher name
-            timeout: watch timeout
-
-        Returns:
-            watcher object
-        """
-        warnings.warn("The 'watch' function was not recommend since v1.0.13.", DeprecationWarning, stacklevel=2)
-
-        w = Watcher(self, name, timeout, raise_errors)
-        w._dev = self
-        return w
-
 
 if __name__ == '__main__':
     b = Bounds(1, 2, 3, 4)
-    print b
-    print b * 1.0
+    print(b)
+    print(b * 1.0)

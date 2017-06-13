@@ -9,10 +9,9 @@ import re
 import json
 import collections
 import tempfile
-from StringIO import StringIO
 
 from PIL import Image
-from atx import logutils
+from atx import logutils, imutils
 
 
 logger = logutils.getLogger(__name__)
@@ -50,7 +49,7 @@ class Device(object):
         """
         timeout = kwargs.pop('timeout', None)
         p = self.raw_cmd(*args, **kwargs)
-        return p.communicate(timeout=timeout)[0].replace('\r\n', '\n')
+        return p.communicate(timeout=timeout)[0].decode('utf-8').replace('\r\n', '\n')
 
     def shell(self, *args, **kwargs):
         """
@@ -128,7 +127,8 @@ class Device(object):
         Return:
             - int [0-4]
         """
-        return self.display.rotation
+        if self.display:
+            return self.display.rotation
     
     def properties(self):
         '''
@@ -169,8 +169,7 @@ class Device(object):
         self.shell('screencap', '-p', remote_file)
         try:
             self.pull(remote_file, local_file)
-            image = Image.open(local_file)
-            image.load() # because Image is a lazy load function
+            image = imutils.open_as_pillow(local_file)
             if scale is not None and scale != 1.0:
                 image = image.resize([int(scale * s) for s in image.size], Image.BICUBIC)
             rotation = self.rotation()
@@ -195,8 +194,7 @@ class Device(object):
         try:
             self.shell('LD_LIBRARY_PATH=/data/local/tmp', self.__minicap, '-s', '-P', params, '>', remote_file)
             self.pull(remote_file, local_file)
-            with open(local_file, 'rb') as f:
-                image = Image.open(StringIO(f.read()))
+            image = imutils.open_as_pillow(local_file)
             return image
         finally:
             self.remove(remote_file)

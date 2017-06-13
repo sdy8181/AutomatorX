@@ -8,7 +8,7 @@ from __future__ import absolute_import
 
 import os
 import sys
-import signal
+import six
 
 import pkg_resources
 try:
@@ -21,18 +21,21 @@ from atx.errors import *
 from atx.drivers import Pattern, Bounds, ImageCrop
 
 
-def _detect_platform(*args):
+def _connect_url(*args):
+    if len(args) == 0:
+        return os.getenv('ATX_CONNECT_URL')
+    return args[0]
+
+
+def _detect_platform(connect_url):
     if os.getenv('ATX_PLATFORM'):
         return os.getenv('ATX_PLATFORM')
 
-    if len(args) == 0:
+    if not connect_url: # None or ""
         return 'android'
-    elif not isinstance(args[0], basestring):
-        return 'android'
-    elif args[0].startswith('http://'): # WDA use http url as connect str
+    elif connect_url.startswith('http://'): # WDA use http url as connect str
         return 'ios'
     else:
-        # default android
         return 'android'
 
 
@@ -47,7 +50,8 @@ def connect(*args, **kwargs):
     Raises:
         SyntaxError, EnvironmentError
     """
-    platform = kwargs.pop('platform', _detect_platform(*args))
+    connect_url = _connect_url(*args)
+    platform = kwargs.pop('platform', _detect_platform(connect_url))
 
     cls = None
     if platform == 'android':
@@ -60,13 +64,18 @@ def connect(*args, **kwargs):
     elif platform == 'ios':
         devcls = __import__('atx.drivers.ios_webdriveragent')
         cls = devcls.drivers.ios_webdriveragent.IOSDevice
+    elif platform == 'webdriver':
+        devcls = __import__('atx.drivers.webdriver')
+        cls = devcls.drivers.webdriver.WebDriver
     elif platform == 'dummy': # for py.test use
         devcls = __import__('atx.drivers.dummy')
         cls = devcls.drivers.dummy.DummyDevice
     
     if cls is None:
         raise SyntaxError('Platform: %s not exists' % platform)
-    c = cls(*args, **kwargs)
+
+    c = cls(connect_url, **kwargs)
+    c.platform = platform
     return c
 
 

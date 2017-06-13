@@ -2,14 +2,14 @@
 #
 
 # Skip all tests in travis
-if test -n "${TRAVIS}"
-then
-	exit 0
-fi
+#test -n "${TRAVIS}" && exit 0
 
 
+export PYTHONPATH=$PWD:$PYTHONPATH
 cd $(dirname $0)
+
 python -mpytest -v \
 	test_ext_report.py \
 	test_dummy.py \
+	test_strutils.py \
 	test_base.py "$@"

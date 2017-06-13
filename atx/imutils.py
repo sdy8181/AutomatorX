@@ -5,23 +5,28 @@
 # https://github.com/jrosebr1/imutils
 #
 
+from __future__ import division
+from __future__ import print_function
+
 import re
 import os
-import sys
-import cv2
 import base64
+from io import BytesIO
 
+import cv2
+import six
 import numpy as np
 from PIL import Image
-from StringIO import StringIO
 
-# import any special Python 2.7 packages
-if sys.version_info.major == 2:
+try:
     from urllib import urlopen
+except ImportError:
+    from urllib.request import urlopen
+# import any special Python 2.7 packages
+#if sys.version_info.major == 2:
 
 # import any special Python 3 packages
-elif sys.version_info.major == 3:
-    from urllib.request import urlopen
+#elif sys.version_info.major == 3:
 
 
 __sys_open = open
@@ -48,7 +53,7 @@ def open(image):
     Raises
         IOError
     '''
-    if isinstance(image, basestring):
+    if isinstance(image, six.string_types):
         name = image
         if name.startswith('data:image/'):
             return _open_data_url(name)
@@ -66,8 +71,11 @@ def open(image):
 def open_as_pillow(filename):
     """ This way can delete file immediately """
     with __sys_open(filename, 'rb') as f:
-        data = StringIO(f.read())
+        data = BytesIO(f.read())
         return Image.open(data)
+    # im = Image.open(filename)
+    # im.load()
+    # return im
 
 
 def from_pillow(pil_image):
@@ -82,10 +90,9 @@ def from_pillow(pil_image):
 
 def to_pillow(image):
     return Image.fromarray(image[:, :, ::-1].copy())
-
     # There is another way
     # img_bytes = cv2.imencode('.png', image)[1].tostring()
-    # return Image.open(StringIO(img_bytes))
+    # return Image.open(BytesIO(img_bytes))
 
 def url_to_image(url, flag=cv2.IMREAD_COLOR):
     """ download the image, convert it to a NumPy array, and then read
@@ -141,8 +148,11 @@ def mark_point(img, x, y):
     output = img.copy()
 
     alpha = 0.5
-    radius = max(5, min(img.shape[:2])/15)
-    cv2.circle(overlay, (x, y), radius, (0, 0, 255), -1)
+    radius = max(5, min(img.shape[:2])//15)
+    center = int(x), int(y)
+    color = (0, 0, 255)
+
+    cv2.circle(overlay, center, radius, color, -1)
     cv2.addWeighted(overlay, alpha, output, 1-alpha, 0, output)
     return output
 
@@ -151,8 +161,8 @@ if __name__ == '__main__':
     image = open('baidu.png')
     image = open(image)
     # cv2.imwrite('baidu.png', image)
-    print image.shape
+    print(image.shape)
     image = crop(image, bottom=200, top=100, left=50, right=200)
-    print image.shape
+    print(image.shape)
     cv2.imwrite('tmp.png', image)
     # to_pillow(image).save('b2.png')

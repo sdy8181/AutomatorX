@@ -19,11 +19,12 @@ If you are new to atx, it better to start from _Quick start tutorial_ or just vi
 
 ## Features
 1. 完全的黑盒测试框架，无需知道项目代码，非侵入式
-1. 支持iOS, Android的自动化测试，两个平台都支持测试第三方应用
-1. 对于iOS的真机,安卓模拟器都能很好的支持
-1. 可以用来测试Windows应用
-1. 对于游戏的测试使用了图像识别
-1. 同一个测试脚本可以通过图像的缩放算法，适配到其他分辨率的手机上
+1. 支持iOS, Android，模拟器的自动化测试，两个平台都支持测试第三方应用
+1. 使用图像识别完成游戏的自动化
+1. 支持WebView（Android）
+1. 脚本编辑器用于快速的写脚本
+1. 漂亮的测试报告
+1. 可以用来测试Windows应用 (这部分没有文档)
 
 ![demo-gif](images/demo.gif)
 
@@ -35,33 +36,59 @@ If you are new to atx, it better to start from _Quick start tutorial_ or just vi
 - 网易内部用户目前请直接联系 `hzsunshx` 或加群 `1347390`
 
 ## 限制
-- 只支持Python2的测试脚本
+- Python版本限制 >= 2.7 && <= 3.5
 - Android 4.1+
 - iOS 9.0+
 - iOS测试必须要有一个Mac
 
 ## Installation
 1. 安装ATX
-	- [Windows](https://github.com/NetEase/AutomatorX/wiki/Win-Installation)
-	- [Mac](https://github.com/NetEase/AutomatorX/wiki/Mac-installation)
 
-	注: iOS的测试一定需要一个Mac
-	装完之后测试下安装是否成功, `python -m atx version` 查看atx版本号
+	最好在virtualenv的环境下安装, 不懂这是啥的可以学习下Andrew_liu写的文章[Python--Virtualenv简明教程](http://www.jianshu.com/p/08c657bd34f1)
 
-1. 安卓的设备上还需要安装一个**ATX手机助手**
+	```bash
+	# virtualenv venv && . venv/bin/activate
+	pip install --upgrade --pre atx
+	pip install opencv_contrib_python
+	```
 
-	可以下载[APK](https://o8oookdsx.qnssl.com/atx-assistant-1.0.4.apk)到手机, 或者手机连接到电脑上用命令行安装 `python -m atx install atx-assistant`
+	为了加快下载速度，国内用户可以使用额外的pip参数`-i https://pypi.doubanio.com/simple/`
 
+	装完之后用命令行简单测试下安装是否成功
+
+	- `python -m atx version` 查看atx版本号
+	- `python -m atx doctor` 检查环境配置是否正常
+
+1. Android测试依赖
+
+	安装[ATX手机助手.apk](https://o8oookdsx.qnssl.com/atx-assistant-1.0.4.apk)到手机, 或者手机连接到电脑上用命令行安装 `python -m atx install atx-assistant`
 
 	该App为自动化提供了输入法的功能，屏幕常量等功能
 
+1. iOS测试依赖
 
-## Getting Started
-To get started, it is better to look at the [Quick Start](docs/QUICKSTART.md)
+	你的iPhone手机需要连接到Mac上，然后Mac安装[WebDriverAgent](https://github.com/facebook/WebDriverAgent)，通常对Xcode部署的人搭WDA的人会遇到不少问题，搞不定继续参考这里 <https://testerhome.com/topics/7220>
 
-More about the ATX [API here](docs/API.md)
+	WDA成功启动后，会生成一个用于ATX连接的http地址，比如`http://localhost:8100`
+	
+1. 额外补充的信息
 
-There is also a doc for professional users. [here](README_ADVANCED.md)
+	- [Win安装](https://github.com/NetEase/AutomatorX/wiki/Win-Installation)
+	- [Mac安装](https://github.com/NetEase/AutomatorX/wiki/Mac-installation)
+
+1. 脚本编辑器
+
+	为了方便快速的写出脚本，提供了两个Web编辑器。
+
+	- [atx-webide](https://github.com/openatx/atx-webide) 用于写游戏脚本，包括截图，代码编辑
+	- [weditor](https://github.com/openatx/weditor) __beta__ 针对Android和iOS原生应用快速定位元素，自动生成代码
+
+## Getting Started （必看）
+* To get started, it is better to look at the [QUICK START](docs/QUICKSTART.md)
+* More about the ATX [API HERE](docs/API.md)
+* iOS的接口文档被放到了testerhome上 <https://testerhome.com/topics/7204>
+
+There is also a doc for professional users. [API ADVANCED](README_ADVANCED.md)
 
 ## Command Line Tools
 There are a lot of command tools along with atx, eg
@@ -78,7 +105,26 @@ etc... To see the whole list click [here](https://github.com/NetEase/AutomatorX/
 ## Known Issues
 If you are having some issues please checkout [wiki](https://github.com/NetEase/AutomatorX/wiki/Common-Issues) first.
 
-## ATX Extentions
+为了避免潜在的Python编码问题，代码文件都应该用UTF-8编码格式保存。
+
+- 对于python2.7 字符串前应该加上u开头，例如`u'你好'`
+
+	文件的开头可以加上下面这段代码，强制使用python3的编码体系(默认全部都是unicode)
+
+	```python
+	from __future__ import unicode_literals
+	```
+
+- 对于python3的非windows系统
+	
+	检查一下`sys.stdout.encoding`的编码是否是UTF-8，不然中文字符的输出通常会有问题
+	解决办法通常就是在bashrc文件中加入一行
+
+	```shell
+	export PYTHONIOENCODING=UTF-8
+	```
+
+## ATX Extentions （扩展功能）
 该部分属于atx的扩展插件实现的功能
 
 插件说明
@@ -86,6 +132,26 @@ If you are having some issues please checkout [wiki](https://github.com/NetEase/
 * [HTML Report](atx/ext/report/README.md)
 	
 	利用此插件可以在ATX自动化跑完之后，自动生成可以HTML报告，详细记录每一步的执行情况
+
+* WebView
+
+	目前仅限安卓, 具体参考 <https://testerhome.com/topics/7232>
+
+	例子代码
+
+	```python
+	# coding: utf-8
+	import atx
+	from atx.ext.chromedriver import ChromeDriver
+
+    d = atx.connect()
+    driver = ChromeDriver(d).driver() # return selenium.driver instance
+    elem = driver.find_element_by_link_text(u"登录")
+    elem.click()
+    driver.quit()
+    ```
+
+    PS: 实现这个扩展并不复杂，简单的封装了一下selenium就搞定了
 
 * Performance record (For Android)
 	
@@ -121,7 +187,6 @@ If you are having some issues please checkout [wiki](https://github.com/NetEase/
 		```
 
 	该部分代码位于 [atx/ext/gt.py](atx/ext/gt.py), 这部分代码目前在我看来，易用性一般般，希望使用者能根据具体情况，进行修改，如果是修改具有通用性，欢迎提交PR，我们会负责Review代码。
-	
 
 ## 代码导读
 `connect` 函数负责根据平台返回相应的类(AndroidDevice or IOSDevice)
